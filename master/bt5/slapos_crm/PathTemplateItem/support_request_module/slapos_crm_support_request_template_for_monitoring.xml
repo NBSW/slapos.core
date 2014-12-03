@@ -12,8 +12,10 @@
               <tuple>
                 <string>Assignee</string>
                 <string>Assignor</string>
+                <string>Associate</string>
+                <string>Auditor</string>
+                <string>Author</string>
                 <string>Manager</string>
-                <string>Owner</string>
               </tuple>
             </value>
         </item>
@@ -21,10 +23,7 @@
             <key> <string>_Modify_portal_content_Permission</string> </key>
             <value>
               <tuple>
-                <string>Assignee</string>
-                <string>Assignor</string>
                 <string>Manager</string>
-                <string>Owner</string>
               </tuple>
             </value>
         </item>
@@ -34,8 +33,10 @@
               <tuple>
                 <string>Assignee</string>
                 <string>Assignor</string>
+                <string>Associate</string>
+                <string>Auditor</string>
+                <string>Author</string>
                 <string>Manager</string>
-                <string>Owner</string>
               </tuple>
             </value>
         </item>

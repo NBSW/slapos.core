@@ -50,29 +50,47 @@
         </item>
         <item>
             <key> <string>_body</string> </key>
-            <value> <string>hosting_subscription = context\n
+            <value> <string>ticket_title = "Hosting Subscription %s is failing." % context.getTitle()\n
 \n
-instance = hosting_subscription.getPredecessorValue()\n
-if instance is None:\n
-  return\n
-instance_list = [instance]\n
-instance_list.extend(instance.getPredecessorValueList())\n
+description = "%s contains software instances which are unallocated or reporting errors." % (\n
+        hosting_subscription_title)\n
+       \n
+support_request = context.Base_generateSupportRequestForSlapOS(\n
+  ticket_title,\n
+  description,\n
+  hosting_subscription.getRelativeUrl())\n
+  \n
+person = context.getSourceAdministrationValue(portal_type="Person")\n
+if not person:\n
+  return support_request\n
+  \n
+if support_request.getSimulationState() != "validated":\n
+  support_request.validate()\n
 \n
-for sub_instance in instance_list:\n
-  if sub_instance and \\\n
-    sub_instance.activate().SoftwareInstance_checkState():\n
-    # This instance is in failing state\n
-    # One notification per hosting subscription\n
-    break\n
+# Send Notification message\n
+message = description\n
+\n
+notification_reference = notification_message_reference\n
+notification_message = portal.portal_notifications.getDocumentValue(\n
+                 reference=notification_reference)\n
+if notification_message is not None:\n
+  mapping_dict = {\'hosting_subscription_title\':context.getTitle(),\n
+                  \'instance\': instance.getTitle()}\n
+\n
+  message = notification_message.asText(\n
+              substitution_method_parameter_dict={\'mapping_dict\':mapping_dict})\n
+  \n
+return support_request.SupportRequest_trySendNotificationMessage(\n
+              ticket_title, message, person.getRelativeUrl())\n
 </string> </value>
         </item>
         <item>
             <key> <string>_params</string> </key>
-            <value> <string></string> </value>
+            <value> <string>instance, notification_message_reference</string> </value>
         </item>
         <item>
             <key> <string>id</string> </key>
-            <value> <string>HostingSubscription_CheckInstanceState</string> </value>
+            <value> <string>HostingSubscription_createSupportRequestEvent</string> </value>
         </item>
       </dictionary>
     </pickle>

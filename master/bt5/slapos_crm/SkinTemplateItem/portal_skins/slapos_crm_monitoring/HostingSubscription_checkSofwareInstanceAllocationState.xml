@@ -62,38 +62,41 @@ if portal.ERP5Site_isSupportRequestCreationClosed():\n
   # Stop ticket creation\n
   return\n
 \n
-hs_title = hosting_subscription.getTitle()\n
-date_check_limit = addToDate(DateTime(), to_add={\'hour\': -4})\n
-has_newest_allocated_instance = False\n
-has_unallocated_instance = False\n
-source_instance = hosting_subscription.getPredecessorValue()\n
-failing_instance = None\n
+date_check_limit = addToDate(DateTime(), to_add={\'hour\': -1})\n
+\n
+if (hosting_subscription.getCreationDate() - date_check_limit) < 0:\n
+  # Too early to check\n
+  return\n
 \n
 if not source_instance:\n
   return\n
-software_instance_list = [source_instance]\n
-predecessors_instance = source_instance.getPredecessorValueList()\n
-if len(predecessors_instance) > 0:\n
-  software_instance_list.extend(predecessors_instance)\n
+\n
+software_instance_list = hosting_subscription.getSpecialiseRelatedValueList(\n
+                 portal_type=["Software Instance", "Slave Instance"])\n
+\n
+has_newest_allocated_instance = False\n
+has_unallocated_instance = False\n
+failing_instance = None\n
 \n
 # Check if at least one software Instance is Allocated\n
 for instance in software_instance_list:\n
-  if instance.getAggregate("") != "":\n
-    if (instance.getCreationDate() - date_check_limit) < 0:\n
-      # This instance is created for more than 4 hours\n
-      has_newest_allocated_instance = True\n
+  if instance.getSlapState() not in ["start_requested", "stop_requested"]:\n
+    continue\n
+\n
+  if (instance.getCreationDate() - date_check_limit) < 0:\n
+    continue\n
+\n
+  if instance.getAggregateValue() is not None:\n
+    has_newest_allocated_instance = True\n
   else:\n
    has_unallocated_instance = True\n
    failing_instance = instance\n
 \n
-if has_unallocated_instance and has_newest_allocated_instance:\n
-  return context.Base_generateSupportRequestForSlapOS(\n
-    "Hosting Subscription %s is partially allocated" % hs_title,\n
-    "%s has allocated instance(s) but, the instance %s (%s) has been unallocated for more than 4 hours." % (\n
-      hs_title, failing_instance.getTitle(), failing_instance.getAbsoluteUrl()),\n
-    hosting_subscription.getRelativeUrl())\n
-else:\n
-  return\n
+  if has_unallocated_instance and has_newest_allocated_instance:\n
+    return context.HostingSubscription_createSupportRequestEvent(\n
+      failing_instance, \'slapos-crm-hosting-subscription-instance-allocation.notification\')\n
+\n
+return\n
 
 
 ]]></string> </value>

@@ -756,3 +756,213 @@ portal_workflow.doActionFor(context, action='edit_action', comment='Visited by R
     self.assertNotEqual(
         'Visited by RegularisationRequest_deleteHostingSubscriptionList',
         ticket.workflow_history['edit_workflow'][-1]['comment'])
+        
+        
+
+class TestSlapOSCrmMonitoringCheckComputerState(testSlapOSMixin):
+
+  def beforeTearDown(self):
+    transaction.abort()
+
+  def _simulateComputer_checkState(self):
+    script_name = 'Computer_checkState'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      raise ValueError('Precondition failed: %s exists in custom' % script_name)
+    createZODBPythonScript(self.portal.portal_skins.custom,
+      script_name,
+      '*args, **kw',
+      '# Script body\n'
+"""portal_workflow = context.portal_workflow
+portal_workflow.doActionFor(context, action='edit_action', comment='Visited by Computer_checkState') """ )
+    transaction.commit()
+
+  def _dropComputer_checkState(self):
+    script_name = 'Computer_checkState'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      self.portal.portal_skins.custom.manage_delObjects(script_name)
+    transaction.commit()
+
+  def test_alarm_check_computer_state(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/public')
+    
+    self._simulateComputer_checkState()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_computer_state.activeSense()
+      self.tic()
+    finally:
+      self._dropComputer_checkState()
+
+    self.assertEqual('Visited by Computer_checkState',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+  def test_alarm_check_computer_state_no_public_computer(self):
+    computer = self._makeComputer(self.new_id)
+    
+    self._simulateComputer_checkState()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_computer_state.activeSense()
+      self.tic()
+    finally:
+      self._dropComputer_checkState()
+
+    self.assertNotEqual('Visited by Computer_checkState',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+
+class TestSlapOSCrmMonitoringCheckComputerAllocationScope(testSlapOSMixin):
+
+  def beforeTearDown(self):
+    transaction.abort()
+
+  def _simulateComputer_checkAndUpdateAllocationScope(self):
+    script_name = 'Computer_checkAndUpdateAllocationScope'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      raise ValueError('Precondition failed: %s exists in custom' % script_name)
+    createZODBPythonScript(self.portal.portal_skins.custom,
+      script_name,
+      '*args, **kw',
+      '# Script body\n'
+"""portal_workflow = context.portal_workflow
+portal_workflow.doActionFor(context, action='edit_action', comment='Visited by Computer_checkAndUpdateAllocationScope') """ )
+    transaction.commit()
+    
+  def _dropComputer_checkAndUpdateAllocationScope(self):
+    script_name = 'Computer_checkAndUpdateAllocationScope'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      self.portal.portal_skins.custom.manage_delObjects(script_name)
+    transaction.commit()
+  
+  def test_alarm_not_allowed_allocation_scope_OpenPublic(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/public')
+    
+    self._simulateComputer_checkAndUpdateAllocationScope()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
+      self.tic()
+    finally:
+      self._dropComputer_checkAndUpdateAllocationScope()
+
+    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+  def test_alarm_not_allowed_allocation_scope_OpenFriend(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/friend')
+    
+    self._simulateComputer_checkAndUpdateAllocationScope()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
+      self.tic()
+    finally:
+      self._dropComputer_checkAndUpdateAllocationScope()
+
+    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+  def test_alarm_not_allowed_allocationScope_open_personal(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/personal')
+    
+    self._simulateComputer_checkAndUpdateAllocationScope()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
+      self.tic()
+    finally:
+      self._dropComputer_checkAndUpdateAllocationScope()
+
+    self.assertNotEqual('Visited by Computer_checkAndUpdateAllocationScope',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+  def test_alarm_allowed_allocation_scope_OpenPersonal_old_computer(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/personal')
+    def getModificationDate(self):
+      return DateTime() - 50
+    
+    from Products.ERP5Type.Base import Base
+    
+    self._simulateComputer_checkAndUpdateAllocationScope()
+    original_get_modification = Base.getModificationDate
+    Base.getModificationDate = getModificationDate
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
+      self.tic()
+    finally:
+      Base.getModificationDate = original_get_modification
+      self._dropComputer_checkAndUpdateAllocationScope()
+
+    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+  def test_alarm_allowed_allocation_scope_OpenPersonalWithSoftwareInstallation(self):
+    computer = self._makeComputer(self.new_id)
+    computer.edit(allocation_scope = 'open/personal')
+    software_installation = self._makeSoftwareInstallation(
+        self.new_id, computer, "http://...")
+    def getModificationDate(self):
+      return DateTime() - 50
+    
+    from Products.ERP5Type.Base import Base
+    
+    self._simulateComputer_checkAndUpdateAllocationScope()
+    original_get_modification = Base.getModificationDate
+    Base.getModificationDate = getModificationDate
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
+      self.tic()
+    finally:
+      Base.getModificationDate = original_get_modification
+      self._dropComputer_checkAndUpdateAllocationScope()
+
+    self.assertNotEqual('Visited by Computer_checkAndUpdateAllocationScope',
+      computer.workflow_history['edit_workflow'][-1]['comment'])
+
+
+class TestSlapOSCrmMonitoringCheckHostingSubscriptionAllocation(testSlapOSMixin):
+
+  def beforeTearDown(self):
+    transaction.abort()
+
+  def _simulateHostingSubscription_checkSofwareInstanceState(self):
+    script_name = 'HostingSubscription_checkSofwareInstanceAllocationState'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      raise ValueError('Precondition failed: %s exists in custom' % script_name)
+    createZODBPythonScript(self.portal.portal_skins.custom,
+      script_name,
+      '*args, **kw',
+      '# Script body\n'
+"""portal_workflow = context.portal_workflow
+portal_workflow.doActionFor(context, action='edit_action', comment='Visited by HostingSubscription_checkSofwareInstanceAllocationState') """ )
+    transaction.commit()
+  
+  def _dropHostingSubscription_checkSofwareInstanceState(self):
+    script_name = 'HostingSubscription_checkSofwareInstanceAllocationState'
+    if script_name in self.portal.portal_skins.custom.objectIds():
+      self.portal.portal_skins.custom.manage_delObjects(script_name)
+    transaction.commit()
+  
+  def test_Alarm_findAndNofitiyUnallocatedSoftwareInstance(self):
+    host_sub = self._makeHostingSubscription(self.new_id)
+    self._makeSoftwareInstance(host_sub, self.generateNewSoftwareReleaseUrl())
+    instance = host_sub.getPredecessorValue()
+    self.assertEqual(instance.getAggregate(""), "")
+    
+    self._simulateHostingSubscription_checkSofwareInstanceState()
+
+    try:
+      self.portal.portal_alarms.slapos_crm_check_partially_allocated_instance.activeSense()
+      self.tic()
+    finally:
+      self._dropHostingSubscription_checkSofwareInstanceState()
+
+    self.assertEqual('Visited by HostingSubscription_checkSofwareInstanceAllocationState',
+      host_sub.workflow_history['edit_workflow'][-1]['comment'])

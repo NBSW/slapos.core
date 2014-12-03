@@ -50,29 +50,58 @@
         </item>
         <item>
             <key> <string>_body</string> </key>
-            <value> <string>portal = context.getPortalObject()\n
-category_uid = portal.restrictedTraverse(\n
-  "portal_categories/allocation_scope/open/public", None).getUid()\n
+            <value> <string encoding="cdata"><![CDATA[
+
+from DateTime import DateTime\n
+from Products.ERP5Type.DateUtils import addToDate\n
 \n
-if category_uid is not None:\n
-  portal.portal_catalog.searchAndActivate(\n
-    portal_type = \'Computer\',\n
-    validation_state = \'validated\',\n
-    default_allocation_scope_uid = category_uid,\n
-    method_id = \'Computer_checkSoftwareInstanceState\',\n
-    activate_kw = {\'tag\':tag}  \n
-  )\n
+hosting_subscription = context\n
+portal = context.getPortalObject()\n
 \n
-context.activate(after_tag=tag).getId()\n
-</string> </value>
+if portal.ERP5Site_isSupportRequestCreationClosed():\n
+  # Stop ticket creation\n
+  return\n
+\n
+date_check_limit = addToDate(DateTime(), to_add={\'hour\': -1})\n
+\n
+if (hosting_subscription.getCreationDate() - date_check_limit) < 0:\n
+  # Too early to check\n
+  return\n
+\n
+if not source_instance:\n
+  return\n
+\n
+software_instance_list = hosting_subscription.getSpecialiseRelatedValueList(\n
+                 portal_type=["Software Instance"])\n
+\n
+has_newest_allocated_instance = False\n
+has_unallocated_instance = False\n
+failing_instance = None\n
+\n
+# Check if at least one software Instance is Allocated\n
+for instance in software_instance_list:\n
+  if instance.getSlapState() not in ["start_requested", "stop_requested"]:\n
+    continue\n
+\n
+  if (instance.getCreationDate() - date_check_limit) < 0:\n
+    continue\n
+\n
+  if instance.SoftwareInstance_hasReportedError():\n
+    return context.HostingSubscription_createSupportRequestEvent(\n
+      instance, \'slapos-crm-hosting-subscription-instance-allocation.notification\')\n
+\n
+return\n
+
+
+]]></string> </value>
         </item>
         <item>
             <key> <string>_params</string> </key>
-            <value> <string>tag, fixit, params</string> </value>
+            <value> <string></string> </value>
         </item>
         <item>
             <key> <string>id</string> </key>
-            <value> <string>Alarm_checkSoftwareInstanceState</string> </value>
+            <value> <string>HostingSubscription_checkSofwareInstanceError</string> </value>
         </item>
       </dictionary>
     </pickle>

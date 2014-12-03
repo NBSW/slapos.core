@@ -39,6 +39,7 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     super(TestSlapOSCloudSupportRequestGeneration, self).afterSetUp()
     self.new_id = self.generateNewId()
     self._cancelTestSupportRequestList()
+    self.portal.REQUEST.set("support_request_in_progress", None)
 
   def _cancelTestSupportRequestList(self):
     for support_request in self.portal.portal_catalog(
@@ -64,6 +65,14 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     person.edit(reference='TESTPERSON-%s' % (new_id, ))
     person.immediateReindexObject()
     return person
+    
+  def _makeSupportRequest(self, new_id):
+    
+    support_request = self.portal.\
+      support_request_module.\
+      slapos_crm_support_request_template_for_monitoring.\
+       Base_createCloneDocument(batch_mode=1)
+    return support_request
 
   def _makeComputer(self,new_id):
     # Clone computer document
@@ -159,8 +168,6 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
 
     self.assertNotEqual(support_request, None)
 
-    support_request = self.portal.restrictedTraverse(support_request)
-
     # The support request is added to computer owner.
     self.assertEquals(support_request.getDestinationDecision(),
                       computer.getSourceAdministration())
@@ -178,8 +185,6 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
 
     self.assertNotEqual(support_request, None)
 
-    support_request = self.portal.restrictedTraverse(support_request)
- 
     # The support request is added to computer owner.
     self.assertEquals(support_request.getDestinationDecision(),
                       host_sub.getDestinationSection())
@@ -195,8 +200,6 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
 
     self.assertNotEqual(support_request, None)
 
-    support_request = self.portal.restrictedTraverse(support_request)
- 
     # The support request is added to computer owner.
     self.assertEquals(support_request.getDestinationDecision(),
                       host_sub.getDestinationSection())
@@ -204,17 +207,37 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
   def test_Base_generateSupportRequestForSlapOS_do_not_recreate_if_open(self):
     title = "Test Support Request %s" % self.new_id
     computer = self._makeComputer(self.new_id)
-    computer.Base_generateSupportRequestForSlapOS(
-      title, title, computer.getRelativeUrl()
-    )
-    self.tic()
-
     support_request = computer.Base_generateSupportRequestForSlapOS(
       title, title, computer.getRelativeUrl()
     )
     self.tic()
+    self.portal.REQUEST.set("support_request_in_progress", None)
 
-    self.assertEqual(support_request, None)
+    same_support_request = computer.Base_generateSupportRequestForSlapOS(
+      title, title, computer.getRelativeUrl()
+    )
+    
+    self.assertEqual(support_request, same_support_request)
+
+
+  def test_Base_generateSupportRequestForSlapOS_do_not_recreate_if_suspended(self):
+    title = "Test Support Request %s" % self.new_id
+    computer = self._makeComputer(self.new_id)
+    support_request = computer.Base_generateSupportRequestForSlapOS(
+      title, title, computer.getRelativeUrl()
+    )
+    
+    support_request.suspend()
+    self.tic()
+    self.portal.REQUEST.set("support_request_in_progress", None)
+
+    same_support_request = computer.Base_generateSupportRequestForSlapOS(
+      title, title, computer.getRelativeUrl()
+    )
+    
+    self.assertEqual(support_request, same_support_request)
+
+
 
   def test_ERP5Site_isSupportRequestCreationClosed(self):
     
@@ -278,8 +301,10 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     )
     self.tic()
 
-    self.portal.restrictedTraverse(support_request).invalidate()
+    support_request.invalidate()
     self.tic()
+    
+    self.portal.REQUEST.set("support_request_in_progress", None)
 
     support_request = computer.Base_generateSupportRequestForSlapOS(
       title, title, computer.getRelativeUrl()
@@ -287,6 +312,19 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     self.tic()
 
     self.assertNotEqual(support_request,None)
+
+  def test_Base_generateSupportRequestForSlapOS_recreate(self):
+    title = "Test Support Request %s" % self.new_id
+    computer = self._makeComputer(self.new_id)
+    support_request = computer.Base_generateSupportRequestForSlapOS(
+      title, title, computer.getRelativeUrl()
+    )
+
+    same_support_request = computer.Base_generateSupportRequestForSlapOS(
+      title, title, computer.getRelativeUrl()
+    )
+    
+    self.assertEqual(support_request, same_support_request)
 
   def _simulateBase_generateSupportRequestForSlapOS(self):
     script_name = 'Base_generateSupportRequestForSlapOS'
@@ -296,7 +334,7 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
       script_name,
       '*args, **kw',
       '# Script body\n'
-"""return 'Visited Base_generateSupportRequestForSlapOS'""")
+"""return context.getPortalObject().REQUEST['_simulateBase_generateSupportRequestForSlapOS']""")
     transaction.commit()
 
   def _dropBase_generateSupportRequestForSlapOS(self):
@@ -315,17 +353,38 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     memcached_dict[computer.getReference()] = json.dumps(
         {"created_at":"%s" % (DateTime() - 1.1)}
     )
+    
+    support_request = self._makeSupportRequest(self.new_id)
+    self.portal.REQUEST.set('_simulateBase_generateSupportRequestForSlapOS', 
+                               support_request)
 
     self._simulateBase_generateSupportRequestForSlapOS()
 
     try:
-      result = computer.Computer_checkState()
+      computer_support_request = computer.Computer_checkState()
     finally:
       self._dropBase_generateSupportRequestForSlapOS()
 
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-  
+    self.assertEqual(support_request,
+      computer_support_request)
+
+  def test_Computer_checkState_empty_cache(self):
+    computer = self._makeComputer(self.new_id)
+
+    support_request = self._makeSupportRequest(self.new_id)
+    self.portal.REQUEST.set('_simulateBase_generateSupportRequestForSlapOS', 
+                               support_request)
+
+    self._simulateBase_generateSupportRequestForSlapOS()
+
+    try:
+      computer_support_request = computer.Computer_checkState()
+    finally:
+      self._dropBase_generateSupportRequestForSlapOS()
+
+    self.assertEqual(support_request,
+      computer_support_request)
+
   def test_SupportRequest_trySendNotificationMessage(self):
     computer = self._makeComputer(self.new_id)
     person = computer.getSourceAdministrationValue()
@@ -337,13 +396,11 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
             destination_decision=computer.getSourceAdministration(),
             source_project_value=computer.getRelativeUrl())
     support_request.validate()
-    time_before_next = 2
     self.tic()
     
     first_event = support_request.SupportRequest_trySendNotificationMessage(
       message_title=title, message=text_content,
-      source_relative_url=person.getRelativeUrl(),
-      interval_of_day=time_before_next
+      source_relative_url=person.getRelativeUrl()
     )
     self.assertNotEqual(first_event, None)
     
@@ -352,599 +409,70 @@ class TestSlapOSCloudSupportRequestGeneration(testSlapOSMixin):
     
     event = support_request.SupportRequest_trySendNotificationMessage(
       message_title=title, message=text_content,
-      source_relative_url=person.getRelativeUrl(),
-      interval_of_day=time_before_next
+      source_relative_url=person.getRelativeUrl()
     )
     self.assertEqual(event, None)
     
-    time_before_next = 1
-    
+    title += "__zz"
     event = support_request.SupportRequest_trySendNotificationMessage(
       message_title=title, message=text_content,
       source_relative_url=person.getRelativeUrl(),
-      interval_of_day=time_before_next
     )
+    
     self.assertEqual(event.getTitle(), title)
-    
 
-  def test_Computer_checkState_empty_cache(self):
-    computer = self._makeComputer(self.new_id)
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = computer.Computer_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareInstance_checkState_error_new_instance(self):
+  def test_SoftwareInstance_hasReportedError(self):
     host_sub = self._makeHostingSubscription(self.new_id)
     self._makeSoftwareInstance(host_sub,self.generateNewSoftwareReleaseUrl())
     instance = host_sub.getPredecessorValue()
+
+    computer = self._makeComputer(self.new_id)
+    self._makeComputerPartitions(computer)
     
     memcached_dict = self.portal.portal_memcached.getMemcachedDict(
       key_prefix='slap_tool',
       plugin_path='portal_memcached/default_memcached_plugin')
 
+    error_date = DateTime()
     memcached_dict[instance.getReference()] = json.dumps(
-        {"created_at":"%s" % DateTime(), "text":"#error "}
+        {"created_at":"%s" % error_date, "text": "#error "}
     )
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = instance.SoftwareInstance_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
     
-    self.assertNotEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
+    self.assertEquals(instance.SoftwareInstance_hasReportedError(), None)
 
-  def test_SoftwareInstance_checkState_error_out_time(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub,self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
+    instance.setAggregateValue(computer.partition1)
     
-    instance.workflow_history['edit_workflow'] = [{
-           'comment':'edit',
-           'error_message': '',
-           'actor': 'ERP5TypeTestCase',
-           'state': 'current',
-           'time': DateTime('2012/11/30 11:11'),
-           'action': 'edit'
-       }]
+    self.assertEquals(instance.SoftwareInstance_hasReportedError(), error_date)
+
+    memcached_dict[instance.getReference()] = json.dumps(
+        {"created_at":"%s" % error_date, "text": "#access "}
+    )
+    
+    self.assertEquals(instance.SoftwareInstance_hasReportedError(), None)
+
+
+  def test_SoftwareInstallation_hasReportedError(self):
+    software_release = self._makeSoftwareRelease(self.new_id)
+    computer = self._makeComputer(self.new_id)
+    installation = self._makeSoftwareInstallation(
+      self.new_id, computer, software_release.getUrlString()
+    )
 
     memcached_dict = self.portal.portal_memcached.getMemcachedDict(
       key_prefix='slap_tool',
       plugin_path='portal_memcached/default_memcached_plugin')
 
-    memcached_dict[instance.getReference()] = json.dumps(
-        {"created_at":"%s" % DateTime(), "text":"#error "}
+    self.assertEquals(installation.SoftwareInstance_hasReportedError(), None)
+
+    error_date = DateTime()
+    memcached_dict[installation.getReference()] = json.dumps(
+        {"created_at":"%s" % error_date, "text": "#error "}
     )
 
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = instance.SoftwareInstance_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
+    self.assertEquals(installation.SoftwareInstallation_hasReportedError(), error_date)
     
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareInstance_checkState_error_in_time(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub,self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
+    memcached_dict[installation.getReference()] = json.dumps(
+        {"created_at":"%s" % error_date, "text": "#building "}
+     )
     
-    memcached_dict = self.portal.portal_memcached.getMemcachedDict(
-      key_prefix='slap_tool',
-      plugin_path='portal_memcached/default_memcached_plugin')
-
-    memcached_dict[instance.getReference()] = json.dumps(
-        {"created_at":"%s" % (DateTime()), "text":"#error "}
-    )
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = instance.SoftwareInstance_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertNotEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareInstance_checkState_access_in_time(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub,self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    
-    memcached_dict = self.portal.portal_memcached.getMemcachedDict(
-      key_prefix='slap_tool',
-      plugin_path='portal_memcached/default_memcached_plugin')
-
-    memcached_dict[instance.getReference()] = json.dumps(
-        {"created_at":"%s" % (DateTime()), "text":"#access "}
-    )
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = instance.SoftwareInstance_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertNotEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareInstance_checkState_empty_cache(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub,self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    
-    self._simulateBase_generateSupportRequestForSlapOS()
-
-    try:
-      result = instance.SoftwareInstance_checkState()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertNotEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareRelease_testForAllocation(self):
-    software_release = self._makeSoftwareRelease(self.new_id)
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public', capacity_scope = 'open')
-    self._makeComputerPartitions(computer)
-    self._makeSoftwareInstallation(
-      self.new_id, computer, software_release.getUrlString()
-    )
-
-    self.tic()
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-    try:
-      result = software_release.SoftwareRelease_testForAllocation()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertNotEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareRelease_testForAllocation_no_public_computer(self):
-    software_release = self._makeSoftwareRelease(self.new_id)
-    computer = self._makeComputer(self.new_id)
-    computer.edit(capacity_scope = 'open')
-    self._makeComputerPartitions(computer)
-    self._makeSoftwareInstallation(
-      self.new_id, computer, software_release.getUrlString()
-    )
-
-    self.tic()
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-    try:
-      result = software_release.SoftwareRelease_testForAllocation()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareRelease_testForAllocation_no_open_computer(self):
-    software_release = self._makeSoftwareRelease(self.new_id)
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public')
-    self._makeComputerPartitions(computer)
-    self._makeSoftwareInstallation(
-      self.new_id, computer, software_release.getUrlString()
-    )
-
-    self.tic()
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-    try:
-      result = software_release.SoftwareRelease_testForAllocation()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def test_SoftwareRelease_testForAllocation_no_free_partitions(self):
-    software_release = self._makeSoftwareRelease(self.new_id)
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public', capacity_scope = 'open')
-    self._makeComputerPartitions(computer)
-
-    computer.partition1.markBusy()
-    computer.partition2.markBusy()
-    computer.partition3.markBusy()
-    computer.partition4.markBusy()
-
-    self._makeSoftwareInstallation(
-      self.new_id, computer, software_release.getUrlString()
-    )
-
-    self.tic()
-
-    self._simulateBase_generateSupportRequestForSlapOS()
-    try:
-      result = software_release.SoftwareRelease_testForAllocation()
-    finally:
-      self._dropBase_generateSupportRequestForSlapOS()
-    
-    self.assertEqual('Visited Base_generateSupportRequestForSlapOS',
-      result)
-
-  def _simulateSoftwareInstance_checkState(self):
-    script_name = 'SoftwareInstance_checkState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by SoftwareInstance_checkState') """ )
-    transaction.commit()
-
-  def _dropSoftwareInstance_checkState(self):
-    script_name = 'SoftwareInstance_checkState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-  
-  def testHostingSubscription_CheckInstanceState(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub, self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    
-    self._simulateSoftwareInstance_checkState()
-    try:
-      host_sub.HostingSubscription_CheckInstanceState()
-      self.tic()
-    finally:
-      self._dropSoftwareInstance_checkState()
-
-    self.assertEqual('Visited by SoftwareInstance_checkState',
-      instance.workflow_history['edit_workflow'][-1]['comment'])
-    
-  
-  def _simulateHostingSubscription_CheckInstanceState(self):
-    script_name = 'HostingSubscription_CheckInstanceState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by HostingSubscription_CheckInstanceState') """ )
-    transaction.commit()
-
-  def _dropHostingSubscription_CheckInstanceState(self):
-    script_name = 'HostingSubscription_CheckInstanceState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-
-  def test_Computer_checkSoftwareInstanceState(self):
-    computer = self._makeComputer(self.new_id)
-    self._makeComputerPartitions(computer)
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub, self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    instance.edit(aggregate_value = computer.partition1.getRelativeUrl())
-    computer.partition1.markBusy()
-    self.tic()
-    
-    self._simulateHostingSubscription_CheckInstanceState()
-    try:
-      computer.Computer_checkSoftwareInstanceState()
-      self.tic()
-    finally:
-      self._dropHostingSubscription_CheckInstanceState()
-
-    self.assertEqual('Visited by HostingSubscription_CheckInstanceState',
-      host_sub.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Computer_checkSoftwareInstanceState_instance_not_allocated(self):
-    computer = self._makeComputer(self.new_id)
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub, self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    self.tic()
-    
-    self._simulateHostingSubscription_CheckInstanceState()
-    try:
-      computer.Computer_checkSoftwareInstanceState()
-      self.tic()
-    finally:
-      self._dropHostingSubscription_CheckInstanceState()
-
-    self.assertNotEqual('Visited by HostingSubscription_CheckInstanceState',
-      instance.workflow_history['edit_workflow'][-1]['comment'])
-
-  def _simulateComputer_checkState(self):
-    script_name = 'Computer_checkState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by Computer_checkState') """ )
-    transaction.commit()
-
-  def _dropComputer_checkState(self):
-    script_name = 'Computer_checkState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-
-  def test_Alarm_checkComputerState(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public')
-    
-    self._simulateComputer_checkState()
-
-    try:
-      self.portal.portal_alarms.slapos_check_computer_state.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkState()
-
-    self.assertEqual('Visited by Computer_checkState',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Alarm_checkComputerState_no_public_computer(self):
-    computer = self._makeComputer(self.new_id)
-    
-    self._simulateComputer_checkState()
-
-    try:
-      self.portal.portal_alarms.slapos_check_computer_state.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkState()
-
-    self.assertNotEqual('Visited by Computer_checkState',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def _simulateComputer_checkSoftwareInstanceState(self):
-    script_name = 'Computer_checkSoftwareInstanceState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by Computer_checkSoftwareInstanceState') """ )
-    transaction.commit()
-
-  def _dropComputer_checkSoftwareInstanceState(self):
-    script_name = 'Computer_checkSoftwareInstanceState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-
-  def test_Alarm_checkSoftwareInstanceState(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public')
-    
-    self._simulateComputer_checkSoftwareInstanceState()
-
-    try:
-      self.portal.portal_alarms.slapos_check_software_instance_state.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkSoftwareInstanceState()
-
-    self.assertEqual('Visited by Computer_checkSoftwareInstanceState',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Alarm_checkSoftwareInstanceState_no_public_computer(self):
-    computer = self._makeComputer(self.new_id)
-    
-    self._simulateComputer_checkSoftwareInstanceState()
-
-    try:
-      self.portal.portal_alarms.slapos_check_software_instance_state.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkSoftwareInstanceState()
-
-    self.assertNotEqual('Visited by Computer_checkSoftwareInstanceState',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def _simulateSoftwareRelease_testForAllocation(self):
-    script_name = 'SoftwareRelease_testForAllocation'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by SoftwareRelease_testForAllocation') """ )
-    transaction.commit()
-
-  def _dropSoftwareRelease_testForAllocation(self):
-    script_name = 'SoftwareRelease_testForAllocation'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-
-  def test_Alarm_checkCloudIsFull(self):
-    software_release_preference = self.portal.portal_preferences.getPreferredSoftwareReleaseToTestForSpace()
-
-    if software_release_preference != '':
-      software_release_list = software_release_preference.split("\n")
-
-      software_release = self._makeSoftwareRelease(
-        self.new_id, software_release_list[0])
-    
-      self._simulateSoftwareRelease_testForAllocation()
-
-      try:
-        self.portal.portal_alarms.slapos_check_cloud_is_full.activeSense()
-        self.tic()
-      finally:
-        self._dropSoftwareRelease_testForAllocation()
-
-      self.assertEqual('Visited by SoftwareRelease_testForAllocation',
-        software_release.workflow_history['edit_workflow'][-1]['comment'])
-        
-  def _simulateComputer_checkAndUpdateAllocationScope(self):
-    script_name = 'Computer_checkAndUpdateAllocationScope'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by Computer_checkAndUpdateAllocationScope') """ )
-    transaction.commit()
-    
-  def _dropComputer_checkAndUpdateAllocationScope(self):
-    script_name = 'Computer_checkAndUpdateAllocationScope'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-  
-  def test_Alarm_notAllowedAllocationScope_OpenPublic(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/public')
-    
-    self._simulateComputer_checkAndUpdateAllocationScope()
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkAndUpdateAllocationScope()
-
-    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  
-  def test_Alarm_notAllowedAllocationScope_OpenFriend(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/friend')
-    
-    self._simulateComputer_checkAndUpdateAllocationScope()
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkAndUpdateAllocationScope()
-
-    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Alarm_notAllowedAllocationScope_OpenPersonal(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/personal')
-    
-    self._simulateComputer_checkAndUpdateAllocationScope()
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
-      self.tic()
-    finally:
-      self._dropComputer_checkAndUpdateAllocationScope()
-
-    self.assertNotEqual('Visited by Computer_checkAndUpdateAllocationScope',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Alarm_AllowedAllocationScope_OpenPersonal_old_computer(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/personal')
-    def getModificationDate(self):
-      return DateTime() - 50
-    
-    from Products.ERP5Type.Base import Base
-    
-    self._simulateComputer_checkAndUpdateAllocationScope()
-    original_get_modification = Base.getModificationDate
-    Base.getModificationDate = getModificationDate
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
-      self.tic()
-    finally:
-      Base.getModificationDate = original_get_modification
-      self._dropComputer_checkAndUpdateAllocationScope()
-
-    self.assertEqual('Visited by Computer_checkAndUpdateAllocationScope',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def test_Alarm_AllowedAllocationScope_OpenPersonalWithSoftwareInstallation(self):
-    computer = self._makeComputer(self.new_id)
-    computer.edit(allocation_scope = 'open/personal')
-    software_installation = self._makeSoftwareInstallation(
-        self.new_id, computer, "http://...")
-    def getModificationDate(self):
-      return DateTime() - 50
-    
-    from Products.ERP5Type.Base import Base
-    
-    self._simulateComputer_checkAndUpdateAllocationScope()
-    original_get_modification = Base.getModificationDate
-    Base.getModificationDate = getModificationDate
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_update_allocation_scope.activeSense()
-      self.tic()
-    finally:
-      Base.getModificationDate = original_get_modification
-      self._dropComputer_checkAndUpdateAllocationScope()
-
-    self.assertNotEqual('Visited by Computer_checkAndUpdateAllocationScope',
-      computer.workflow_history['edit_workflow'][-1]['comment'])
-
-  def _simulateHostingSubscription_checkSofwareInstanceState(self):
-    script_name = 'HostingSubscription_checkSofwareInstanceAllocationState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      raise ValueError('Precondition failed: %s exists in custom' % script_name)
-    createZODBPythonScript(self.portal.portal_skins.custom,
-      script_name,
-      '*args, **kw',
-      '# Script body\n'
-"""portal_workflow = context.portal_workflow
-portal_workflow.doActionFor(context, action='edit_action', comment='Visited by HostingSubscription_checkSofwareInstanceAllocationState') """ )
-    transaction.commit()
-  
-  def _dropHostingSubscription_checkSofwareInstanceState(self):
-    script_name = 'HostingSubscription_checkSofwareInstanceAllocationState'
-    if script_name in self.portal.portal_skins.custom.objectIds():
-      self.portal.portal_skins.custom.manage_delObjects(script_name)
-    transaction.commit()
-  
-  def test_Alarm_findAndNofitiyUnallocatedSoftwareInstance(self):
-    host_sub = self._makeHostingSubscription(self.new_id)
-    self._makeSoftwareInstance(host_sub, self.generateNewSoftwareReleaseUrl())
-    instance = host_sub.getPredecessorValue()
-    self.assertEqual(instance.getAggregate(""), "")
-    
-    self._simulateHostingSubscription_checkSofwareInstanceState()
-
-    try:
-      self.portal.portal_alarms.slapos_crm_check_partially_allocated_instance.activeSense()
-      self.tic()
-    finally:
-      self._dropHostingSubscription_checkSofwareInstanceState()
-
-    self.assertEqual('Visited by HostingSubscription_checkSofwareInstanceAllocationState',
-      host_sub.workflow_history['edit_workflow'][-1]['comment'])
-    
+    self.assertEquals(installation.SoftwareInstallation_hasReportedError(), None)
